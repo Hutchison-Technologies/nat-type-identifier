@@ -1,0 +1,13 @@
+{
+  "name": "stun-test",
+  "version": "0.0.1",
+  "description": "An application used to hit stun servers and return the NAT type",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "binascii": "^0.0.2",
+    "stun": "^2.1.0"
+  },
+  "devDependencies": {}
+}
