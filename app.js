@@ -1,14 +1,9 @@
 const dgram = require("dgram");
 const binascii = require("binascii");
-const { start } = require("repl");
+const { EventEmitter } = require("events");
 
 // Types for a STUN message
 const BindRequestMsg = "0001";
-const BindResponseMsg = "0101";
-const BindErrorResponseMsg = "0111";
-const SharedSecretRequestMsg = "0002";
-const SharedSecretResponseMsg = "0102";
-const SharedSecretErrorResponseMsg = "0112";
 
 const msgTypes = {
   "0001": "BindRequestMsg",
@@ -25,16 +20,6 @@ const stunAttributes = {
   ChangeRequest: "0003",
   SourceAddress: "0004",
   ChangedAddress: "0005",
-  Username: "0006",
-  Password: "0007",
-  MessageIntegrity: "0008",
-  ErrorCode: "0009",
-  UnknownAttribute: "000A",
-  ReflectedFrom: "000B",
-  XorOnly: "0021",
-  XorMappedAddress: "8020",
-  ServerName: "8022",
-  SecondaryAddress: "8050",
 };
 
 // NAT Types
@@ -46,7 +31,23 @@ const RESTRICTED_NAT = "Restric NAT";
 const RESTRICTED_PORT_NAT = "Restric Port NAT";
 const SYMMETRIC_NAT = "Symmetric NAT";
 
-const CHANGE_ADDR_ERR = "Meet an error, when do Test1 on Changed IP and Port";
+// Response Attributes
+const EXT_IP = "ExternalIP";
+const EXT_PORT = "ExternalPort";
+const SRC_IP = "SourceIP";
+const SRC_PORT = "SourcePort";
+const CHANGED_IP = "ChangedIP";
+const CHANGED_PORT = "ChangedPort";
+const RESP = "Resp";
+
+const CHANGE_ADDR_ERR = "Met an error during Test1 on Changed IP and Port";
+
+const sourceIp = "0.0.0.0";
+const sourcePort = 54320;
+
+const defaultStunHost = "stun.sipgate.net";
+const defaultSampleCount = 20;
+const sampleCountEventListenerMultiplier = 50;
 
 /* 
    #######################
@@ -60,18 +61,6 @@ const pad = (num, size) => {
   return num;
 };
 
-/* 
-   #########################
-   Main Methods
-   #########################
-*/
-
-var socket = dgram.createSocket({
-  type: "udp4",
-  reuseAddr: true,
-  recvBufferSize: 2048,
-});
-
 const bytesToStr = (bytes) => {
   return `${pad(bytes[0].toString(16), 2)}${
     !!bytes[1] ? pad(bytes[1].toString(16), 2) : ""
@@ -82,34 +71,57 @@ const bytesValToMsgType = (bytes) => {
   return msgTypes[`${bytesToStr(bytes)}`];
 };
 
+const convertToHexBuffer = (text) => {
+  return Buffer.from(binascii.a2b_hex(text).toUpperCase());
+};
+
 const hexValToInt = (hex) => {
   return parseInt(Number(`0x${hex}`), 10);
 };
 
-const getIpInfo = async ({
-  sourceIp = "0.0.0.0",
-  sourcePort = 54320,
-  stunHost = "None",
-  stunPort = 3478,
-}) => {
-  socket.bind(sourcePort, sourceIp);
+const getModeFromArray = (array) => {
+  var modeMap = {};
+  var modeElement = array[0],
+    maxCount = 1;
 
-  console.log("GetIpInfo1");
+  if (array.length == 0) {
+    return null;
+  }
+
+  for (var i = 0; i < array.length; i++) {
+    var elem = array[i];
+    modeMap[elem] == null ? (modeMap[elem] = 1) : modeMap[elem]++;
+    if (modeMap[elem] > maxCount) {
+      modeElement = elem;
+      maxCount = modeMap[elem];
+    }
+  }
+  return modeElement;
+};
+
+/* 
+   #########################
+   Main Methods
+   #########################
+*/
+
+const getIpInfo = async ({ stunHost, stunPort = 3478 }, index) => {
   var natType = await getNatType(socket, sourceIp, stunHost, stunPort);
-  console.log("GetIpInfo2");
 
   if (!!natType) {
-    console.log("GetIpInfo3");
-    socket.close();
+    // If a network error occurred then try running the test again
+    if (natType === CHANGE_ADDR_ERR || natType === BLOCKED) {
+      return await getIpInfo({ stunHost, stunPort }, index);
+    }
+    console.log(`Test #${index} - NAT TYPE: ${natType}`);
     return natType;
   }
 
-  console.log("GetIpInfo4");
-  // socket.close();
-  // return ERROR;
+  return ERROR;
 };
 
 const genTransactionId = () => {
+  // Generics a numeric transaction ID
   const num = "0123456789";
   let output = "";
   for (let i = 0; i < 32; ++i) {
@@ -134,9 +146,8 @@ const handleStunTestResponse = (address, port, message, transId) => {
 
   // Check the response message type
   bindRespMsg = bytesValToMsgType(msgType) == "BindResponseMsg";
-  console.log("bindRespMsg Response: ", bytesValToMsgType(msgType));
 
-  // Check that the transaction IDs match, c2 A value is removed as it is
+  // Check that the transaction IDs match, 0xc2 value is removed as it is
   // an annoying UTF-8 encode byte that messes up the entire comparison
   transIdMatch = transId.includes(
     Buffer.from(message, "binary")
@@ -148,7 +159,7 @@ const handleStunTestResponse = (address, port, message, transId) => {
 
   if (bindRespMsg && transIdMatch) {
     // This is where the fun begins...
-    responseVal["Resp"] = true;
+    responseVal[RESP] = true;
     msgLen = hexValToInt(`${buf.slice(2, 4).toString("hex")}`);
 
     var lengthRemaining = msgLen;
@@ -160,8 +171,8 @@ const handleStunTestResponse = (address, port, message, transId) => {
         `${bytesToStr(buf.slice(base + 2, base + 4)).replace(/^0+/, "")}`
       );
 
+      // Fetch port and ipAddr value from buffer
       port = hexValToInt(`${bytesToStr(buf.slice(base + 6, base + 8))}`);
-
       octA = hexValToInt(`${bytesToStr(buf.slice(base + 8, base + 9))}`);
       octB = hexValToInt(`${bytesToStr(buf.slice(base + 9, base + 10))}`);
       octC = hexValToInt(`${bytesToStr(buf.slice(base + 10, base + 11))}`);
@@ -170,14 +181,14 @@ const handleStunTestResponse = (address, port, message, transId) => {
 
       switch (attrType) {
         case stunAttributes.MappedAddress:
-          responseVal["ExternalIP"] = `${ipAddr}`;
-          responseVal["ExternalPort"] = port;
+          responseVal[EXT_IP] = ipAddr;
+          responseVal[EXT_PORT] = port;
         case stunAttributes.SourceAddress:
-          responseVal["SourceIP"] = `${ipAddr}`;
-          responseVal["SourcePort"] = port;
+          responseVal[SRC_IP] = ipAddr;
+          responseVal[SRC_PORT] = port;
         case stunAttributes.ChangedAddress:
-          responseVal["ChangedIP"] = `${ipAddr}`;
-          responseVal["ChangedPort"] = port;
+          responseVal[CHANGED_IP] = ipAddr;
+          responseVal[CHANGED_PORT] = port;
       }
 
       base = base + 4 + attrLen;
@@ -185,10 +196,6 @@ const handleStunTestResponse = (address, port, message, transId) => {
     }
   }
   return responseVal;
-};
-
-convertToHexBuffer = (text) => {
-  return Buffer.from(binascii.a2b_hex(text).toUpperCase());
 };
 
 const stunTest = async (socket, host, port, sendData = "") => {
@@ -203,7 +210,7 @@ const stunTest = async (socket, host, port, sendData = "") => {
   var finalData = Buffer.concat([prxData, transId, sndData]);
 
   return new Promise((resolve) => {
-    sendMessage = () => {
+    sendMessage = (counter = 0) => {
       socket.send(
         finalData,
         0,
@@ -212,11 +219,12 @@ const stunTest = async (socket, host, port, sendData = "") => {
         host,
         (err, nrOfBytesSent) => {
           if (err) resolve(console.log(err));
-          console.log("UDP message sent to " + host + ":" + port);
+          console.debug("UDP message sent to " + host + ":" + port);
 
           setTimeout(() => {
             if (!messageReceived) {
-              sendMessage();
+              if (counter > 3) resolve({ Resp: null });
+              sendMessage(counter + 1);
             }
           }, 2000);
         }
@@ -237,34 +245,34 @@ const stunTest = async (socket, host, port, sendData = "") => {
 
       sendMessage();
     } catch (error) {
-      console.log(error);
+      console.debug(error);
       resolve({ Resp: false });
     }
   });
 };
 
 const getNatType = async (socket, sourceIp, stunHost, stunPort) => {
-  console.log("Starting Tests...");
-
   var type;
   var stunResult;
   var response = false;
 
   if (stunHost) {
     stunResult = await stunTest(socket, stunHost, stunPort);
-    response = stunResult["Resp"];
+    response = stunResult[RESP];
   }
   if (!response) {
-    return BLOCKED, stunResult;
+    return BLOCKED;
   }
 
-  var exIP = stunResult["ExternalIP"];
-  var exPort = stunResult["ExternalPort"];
-  var changedIP = stunResult["ChangedIP"];
-  var changedPort = stunResult["ChangedPort"];
+  var exIP = stunResult[EXT_IP];
+  var exPort = stunResult[EXT_PORT];
+  var changedIP = stunResult[CHANGED_IP];
+  var changedPort = stunResult[CHANGED_PORT];
 
-  if (stunResult["ExternalIP"] == sourceIp) {
-    var changeRequest = `${stunAttributes.ChangeRequest}000400000006`;
+  var msgAttrLen = "0004";
+
+  if (stunResult[EXT_IP] == sourceIp) {
+    var changeRequest = `${stunAttributes.ChangeRequest}${msgAttrLen}00000006`;
     var newStunResult = await stunTest(
       socket,
       stunHost,
@@ -272,14 +280,13 @@ const getNatType = async (socket, sourceIp, stunHost, stunPort) => {
       changeRequest
     );
 
-    if (newStunResult["Resp"]) {
+    if (newStunResult[RESP]) {
       type = OPEN_INTERNET;
     } else {
       type = SYMMETRIC_UDP_FIREWALL;
     }
   } else {
-    var changeRequest = `${stunAttributes.ChangeRequest}000400000006`;
-    console.log("Do Test2");
+    var changeRequest = `${stunAttributes.ChangeRequest}${msgAttrLen}00000006`;
     var secondStunResult = await stunTest(
       socket,
       stunHost,
@@ -287,31 +294,26 @@ const getNatType = async (socket, sourceIp, stunHost, stunPort) => {
       changeRequest
     );
 
-    console.log("Result: ", secondStunResult);
-    if (secondStunResult["Resp"]) {
+    if (secondStunResult[RESP]) {
       type = FULL_CONE;
     } else {
-      console.log("Do Test1");
       var secondStunResult = await stunTest(socket, changedIP, changedPort);
 
-      console.log("Result: ", secondStunResult);
-      if (!secondStunResult["Resp"]) {
+      if (!secondStunResult[RESP]) {
         type = CHANGE_ADDR_ERR;
       } else {
         if (
-          exIP == secondStunResult["ExternalIP"] &&
-          exPort == secondStunResult["ExternalPort"]
+          exIP == secondStunResult[EXT_IP] &&
+          exPort == secondStunResult[EXT_PORT]
         ) {
-          var changePortRequest = `${stunAttributes.ChangeRequest}000400000002`;
-          console.log("Do Test3");
+          var changePortRequest = `${stunAttributes.ChangeRequest}${msgAttrLen}00000002`;
           var thirdStunResult = await stunTest(
             socket,
             changedIP,
             stunPort,
             changePortRequest
           );
-          console.log("Result: ", thirdStunResult);
-          if (thirdStunResult["Resp"]) {
+          if (thirdStunResult[RESP]) {
             type = RESTRICTED_NAT;
           } else {
             type = RESTRICTED_PORT_NAT;
@@ -326,4 +328,47 @@ const getNatType = async (socket, sourceIp, stunHost, stunPort) => {
   return type;
 };
 
-getIpInfo({ stunHost: "stun.sipgate.net" });
+/* 
+   ##########################
+   Socket Setup & Main Method
+   ##########################
+*/
+
+var socket = dgram.createSocket({
+  type: "udp4",
+  reuseAddr: true,
+  recvBufferSize: 2048,
+});
+
+const getDeterminedNatType = async (
+  stunHost = defaultStunHost,
+  sampleCount = defaultSampleCount
+) => {
+  EventEmitter.defaultMaxListeners =
+    sampleCountEventListenerMultiplier * sampleCount;
+  socket.bind(sourcePort, sourceIp);
+
+  const resultsList = [];
+  // Take 20 samples and find mode value (to determine most probable NAT type)
+  for (var i = 0; i < sampleCount; i++) {
+    const result = await getIpInfo({ stunHost }, i + 1);
+    resultsList.push(result);
+  }
+
+  socket.close();
+  const determinedNatType = getModeFromArray(resultsList);
+  console.log("\nDetermined NAT Type: ", determinedNatType);
+  console.log(
+    `A mode value is selected using a ${sampleCount} test samples as failed responses via UDP can cause inaccurate results.`
+  );
+  return determinedNatType;
+};
+
+// Include runtime argument capability for user to specify stun host
+// Argument 1: STUN Host, Arg2: Sample Count
+const runtimeArguments = process.argv.slice(2);
+runtimeArguments[0]
+  ? runtimeArguments[1]
+    ? getDeterminedNatType(runtimeArguments[0], runtimeArguments[1])
+    : getDeterminedNatType(runtimeArguments[0])
+  : getDeterminedNatType();
