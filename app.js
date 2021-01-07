@@ -1,5 +1,6 @@
 const dgram = require("dgram");
 const binascii = require("binascii");
+const { start } = require("repl");
 
 // Types for a STUN message
 const BindRequestMsg = "0001";
@@ -36,9 +37,16 @@ const stunAttributes = {
   SecondaryAddress: "8050",
 };
 
-// CONSTANTS
+// NAT Types
 const BLOCKED = "Blocked";
-const ERROR = "Error, check logs.";
+const OPEN_INTERNET = "Open Internet";
+const FULL_CONE = "Full Cone";
+const SYMMETRIC_UDP_FIREWALL = "Symmetric UDP Firewall";
+const RESTRICTED_NAT = "Restric NAT";
+const RESTRICTED_PORT_NAT = "Restric Port NAT";
+const SYMMETRIC_NAT = "Symmetric NAT";
+
+const CHANGE_ADDR_ERR = "Meet an error, when do Test1 on Changed IP and Port";
 
 /* 
    #######################
@@ -78,7 +86,7 @@ const hexValToInt = (hex) => {
   return parseInt(Number(`0x${hex}`), 10);
 };
 
-const getIpInfo = ({
+const getIpInfo = async ({
   sourceIp = "0.0.0.0",
   sourcePort = 54320,
   stunHost = "None",
@@ -86,23 +94,19 @@ const getIpInfo = ({
 }) => {
   socket.bind(sourcePort, sourceIp);
 
-  var { natType, nat } = getNatType(
-    socket,
-    sourceIp,
-    sourcePort,
-    stunHost,
-    stunPort
-  );
+  console.log("GetIpInfo1");
+  var natType = await getNatType(socket, sourceIp, stunHost, stunPort);
+  console.log("GetIpInfo2");
 
-  //   if (nat) {
-  //     externalIp = nat["ExternalIP"];
-  //     externalPort = nat["ExternalPort"];
-  //     socket.close();
-  //     return natType, externalIp, externalPort;
-  //   }
+  if (!!natType) {
+    console.log("GetIpInfo3");
+    socket.close();
+    return natType;
+  }
 
-  //   socket.close();
-  //   return ERROR;
+  console.log("GetIpInfo4");
+  // socket.close();
+  // return ERROR;
 };
 
 const genTransactionId = () => {
@@ -114,13 +118,17 @@ const genTransactionId = () => {
   return output;
 };
 
-const handleStunTestResponse = (
-  address,
-  port,
-  message,
-  transId,
-  responseVal
-) => {
+const handleStunTestResponse = (address, port, message, transId) => {
+  var responseVal = {
+    Resp: false,
+    ExternalIP: null,
+    ExternalPort: null,
+    SourceIP: null,
+    SourcePort: null,
+    ChangedIP: null,
+    ChangedPort: null,
+  };
+
   buf = Buffer.from(message);
   msgType = buf.slice(0, 2);
 
@@ -135,7 +143,7 @@ const handleStunTestResponse = (
       .slice(4, 30)
       .toString("hex")
       .replace(/c2/g, "")
-      .slice(4, 26)
+      .slice(4, 10)
   );
 
   if (bindRespMsg && transIdMatch) {
@@ -152,18 +160,13 @@ const handleStunTestResponse = (
         `${bytesToStr(buf.slice(base + 2, base + 4)).replace(/^0+/, "")}`
       );
 
-      console.log("AttrType: ", attrType);
-      console.log("AttrLength: ", attrLen);
-
       port = hexValToInt(`${bytesToStr(buf.slice(base + 6, base + 8))}`);
-      console.log("Port: ", port);
 
       octA = hexValToInt(`${bytesToStr(buf.slice(base + 8, base + 9))}`);
       octB = hexValToInt(`${bytesToStr(buf.slice(base + 9, base + 10))}`);
       octC = hexValToInt(`${bytesToStr(buf.slice(base + 10, base + 11))}`);
       octD = hexValToInt(`${bytesToStr(buf.slice(base + 11, base + 12))}`);
       const ipAddr = [octA, octB, octC, octD].join(".");
-      console.log("IP: ", `${ipAddr}`);
 
       switch (attrType) {
         case stunAttributes.MappedAddress:
@@ -177,110 +180,150 @@ const handleStunTestResponse = (
           responseVal["ChangedPort"] = port;
       }
 
-      // End of while:
       base = base + 4 + attrLen;
       lengthRemaining = lengthRemaining - (4 + attrLen);
     }
   }
-  responseVal;
-};
-
-const stunTest = (socket, host, port, sourceIp, sourcePort, sendData = "") => {
-  var responseVal = {
-    Resp: false,
-    ExternalIP: null,
-    ExternalPort: null,
-    SourceIP: null,
-    SourcePort: null,
-    ChangedIP: null,
-    ChangedPort: null,
-  };
-
-  strLen = pad(sendData.length / 2, 4);
-  transactionId = genTransactionId();
-  strData = `${BindRequestMsg}${strLen}${transactionId}${sendData}`;
-  data = binascii.a2b_hex(strData).toUpperCase();
-
-  socket.on("message", function (message, remote) {
-    return handleStunTestResponse(
-      remote.address,
-      remote.port,
-      message,
-      binascii.hexlify(data).toUpperCase(),
-      responseVal
-    );
-  });
-
-  try {
-    socket.send(data, 0, data.length, port, host, (err, nrOfBytesSent) => {
-      if (err) return console.log(err);
-      console.log("UDP message sent to " + host + ":" + port);
-    });
-  } catch (error) {
-    console.log(error);
-    return { Resp: false };
-  }
-
   return responseVal;
 };
 
-const getNatType = (socket, sourceIp, sourcePort, stunHost, stunPort) => {
-  console.log("Starting test...");
+convertToHexBuffer = (text) => {
+  return Buffer.from(binascii.a2b_hex(text).toUpperCase());
+};
 
+const stunTest = async (socket, host, port, sendData = "") => {
+  var messageReceived = false;
+  var strLen = pad(sendData.length / 2, 4);
+  var transactionId = genTransactionId();
+
+  var prxData = convertToHexBuffer(`${BindRequestMsg}${strLen}`);
+  var transId = convertToHexBuffer(transactionId).slice(0, 16);
+  var sndData = convertToHexBuffer(sendData);
+
+  var finalData = Buffer.concat([prxData, transId, sndData]);
+
+  return new Promise((resolve) => {
+    sendMessage = () => {
+      socket.send(
+        finalData,
+        0,
+        finalData.length,
+        port,
+        host,
+        (err, nrOfBytesSent) => {
+          if (err) resolve(console.log(err));
+          console.log("UDP message sent to " + host + ":" + port);
+
+          setTimeout(() => {
+            if (!messageReceived) {
+              sendMessage();
+            }
+          }, 2000);
+        }
+      );
+    };
+
+    try {
+      socket.on("message", (message, remote) => {
+        messageReceived = true;
+        const response = handleStunTestResponse(
+          remote.address,
+          remote.port,
+          message,
+          transactionId
+        );
+        resolve(response);
+      });
+
+      sendMessage();
+    } catch (error) {
+      console.log(error);
+      resolve({ Resp: false });
+    }
+  });
+};
+
+const getNatType = async (socket, sourceIp, stunHost, stunPort) => {
+  console.log("Starting Tests...");
+
+  var type;
   var stunResult;
   var response = false;
 
   if (stunHost) {
-    stunResult = stunTest(socket, stunHost, stunPort, sourceIp, sourcePort);
+    stunResult = await stunTest(socket, stunHost, stunPort);
     response = stunResult["Resp"];
   }
   if (!response) {
     return BLOCKED, stunResult;
   }
 
-  console.log("Result: %s", stunResult);
-  // exIP = stunResult['ExternalIP']
-  // exPort = stunResult['ExternalPort']
-  // changedIP = stunResult['ChangedIP']
-  // changedPort = stunResult['ChangedPort']
-  // if stunResult['ExternalIP'] == source_ip:
-  //     changeRequest = ''.join([ChangeRequest, '0004', "00000006"])
-  //     stunResult = stun_test(s, stun_host, stun_port, source_ip, source_port,
-  //                     changeRequest)
-  //     if stunResult['Resp']:
-  //         typ = OpenInternet
-  //     else:
-  //         typ = SymmetricUDPFirewall
-  // else:
-  //     changeRequest = ''.join([ChangeRequest, '0004', "00000006"])
-  //     log.debug("Do Test2")
-  //     stunResult = stun_test(s, stun_host, stun_port, source_ip, source_port,
-  //                     changeRequest)
-  //     log.debug("Result: %s", stunResult)
-  //     if stunResult['Resp']:
-  //         typ = FullCone
-  //     else:
-  //         log.debug("Do Test1")
-  //         stunResult = stun_test(s, changedIP, changedPort, source_ip, source_port)
-  //         log.debug("Result: %s", stunResult)
-  //         if not stunResult['Resp']:
-  //             typ = ChangedAddressError
-  //         else:
-  //             if exIP == stunResult['ExternalIP'] and exPort == stunResult['ExternalPort']:
-  //                 changePortRequest = ''.join([ChangeRequest, '0004',
-  //                                             "00000002"])
-  //                 log.debug("Do Test3")
-  //                 stunResult = stun_test(s, changedIP, port, source_ip, source_port,
-  //                                 changePortRequest)
-  //                 log.debug("Result: %s", stunResult)
-  //                 if stunResult['Resp']:
-  //                     typ = RestricNAT
-  //                 else:
-  //                     typ = RestricPortNAT
-  //             else:
-  //                 typ = SymmetricNAT
+  var exIP = stunResult["ExternalIP"];
+  var exPort = stunResult["ExternalPort"];
+  var changedIP = stunResult["ChangedIP"];
+  var changedPort = stunResult["ChangedPort"];
 
-  return { natType: 1, nat: { ExternalIP: 0, ExternalPort: 0 } };
+  if (stunResult["ExternalIP"] == sourceIp) {
+    var changeRequest = `${stunAttributes.ChangeRequest}000400000006`;
+    var newStunResult = await stunTest(
+      socket,
+      stunHost,
+      stunPort,
+      changeRequest
+    );
+
+    if (newStunResult["Resp"]) {
+      type = OPEN_INTERNET;
+    } else {
+      type = SYMMETRIC_UDP_FIREWALL;
+    }
+  } else {
+    var changeRequest = `${stunAttributes.ChangeRequest}000400000006`;
+    console.log("Do Test2");
+    var secondStunResult = await stunTest(
+      socket,
+      stunHost,
+      stunPort,
+      changeRequest
+    );
+
+    console.log("Result: ", secondStunResult);
+    if (secondStunResult["Resp"]) {
+      type = FULL_CONE;
+    } else {
+      console.log("Do Test1");
+      var secondStunResult = await stunTest(socket, changedIP, changedPort);
+
+      console.log("Result: ", secondStunResult);
+      if (!secondStunResult["Resp"]) {
+        type = CHANGE_ADDR_ERR;
+      } else {
+        if (
+          exIP == secondStunResult["ExternalIP"] &&
+          exPort == secondStunResult["ExternalPort"]
+        ) {
+          var changePortRequest = `${stunAttributes.ChangeRequest}000400000002`;
+          console.log("Do Test3");
+          var thirdStunResult = await stunTest(
+            socket,
+            changedIP,
+            stunPort,
+            changePortRequest
+          );
+          console.log("Result: ", thirdStunResult);
+          if (thirdStunResult["Resp"]) {
+            type = RESTRICTED_NAT;
+          } else {
+            type = RESTRICTED_PORT_NAT;
+          }
+        } else {
+          type = SYMMETRIC_NAT;
+        }
+      }
+    }
+  }
+
+  return type;
 };
 
 getIpInfo({ stunHost: "stun.sipgate.net" });
