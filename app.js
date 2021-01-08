@@ -48,6 +48,7 @@ const sourcePort = 54320;
 const defaultStunHost = "stun.sipgate.net";
 const defaultSampleCount = 20;
 const sampleCountEventListenerMultiplier = 50;
+var requestCounter = 0;
 
 /* 
    #######################
@@ -55,31 +56,31 @@ const sampleCountEventListenerMultiplier = 50;
    #######################
 */
 
-const pad = (num, size) => {
+function pad(num, size) {
   num = num.toString();
   while (num.length < size) num = "0" + num;
   return num;
-};
+}
 
-const bytesToStr = (bytes) => {
+function bytesToStr(bytes) {
   return `${pad(bytes[0].toString(16), 2)}${
     !!bytes[1] ? pad(bytes[1].toString(16), 2) : ""
   }`;
-};
+}
 
-const bytesValToMsgType = (bytes) => {
+function bytesValToMsgType(bytes) {
   return msgTypes[`${bytesToStr(bytes)}`];
-};
+}
 
-const convertToHexBuffer = (text) => {
+function convertToHexBuffer(text) {
   return Buffer.from(binascii.a2b_hex(text).toUpperCase());
-};
+}
 
-const hexValToInt = (hex) => {
+function hexValToInt(hex) {
   return parseInt(Number(`0x${hex}`), 10);
-};
+}
 
-const getModeFromArray = (array) => {
+function getModeFromArray(array) {
   var modeMap = {};
   var modeElement = array[0],
     maxCount = 1;
@@ -97,7 +98,7 @@ const getModeFromArray = (array) => {
     }
   }
   return modeElement;
-};
+}
 
 /* 
    #########################
@@ -218,7 +219,9 @@ const stunTest = async (socket, host, port, sendData = "") => {
         port,
         host,
         (err, nrOfBytesSent) => {
+          if (requestCounter > 1000) resolve({ Resp: false });
           if (err) resolve(console.log(err));
+          requestCounter++;
           console.debug("UDP message sent to " + host + ":" + port);
 
           setTimeout(() => {
@@ -341,8 +344,8 @@ var socket = dgram.createSocket({
 });
 
 const getDeterminedNatType = async (
-  stunHost = defaultStunHost,
-  sampleCount = defaultSampleCount
+  sampleCount = defaultSampleCount,
+  stunHost = defaultStunHost
 ) => {
   EventEmitter.defaultMaxListeners =
     sampleCountEventListenerMultiplier * sampleCount;
@@ -365,7 +368,7 @@ const getDeterminedNatType = async (
 };
 
 // Include runtime argument capability for user to specify stun host
-// Argument 1: STUN Host, Arg2: Sample Count
+// Argument 1: Sample Count, Arg2: STUN Host
 const runtimeArguments = process.argv.slice(2);
 runtimeArguments[0]
   ? runtimeArguments[1]
