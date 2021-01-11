@@ -45,9 +45,12 @@ const CHANGE_ADDR_ERR = "Met an error during Test1 on Changed IP and Port";
 const sourceIp = "0.0.0.0";
 const sourcePort = 54320;
 
+const backgroundOps = [];
+
 const defaultStunHost = "stun.sipgate.net";
 const defaultSampleCount = 20;
 const sampleCountEventListenerMultiplier = 50;
+
 var requestCounter = 0;
 
 /* 
@@ -117,7 +120,6 @@ const getIpInfo = async ({ stunHost, stunPort = 3478 }, index) => {
     console.log(`Test #${index} - NAT TYPE: ${natType}`);
     return natType;
   }
-
   return ERROR;
 };
 
@@ -190,28 +192,32 @@ const handleStunTestResponse = (address, port, message, transId) => {
         case stunAttributes.ChangedAddress:
           responseVal[CHANGED_IP] = ipAddr;
           responseVal[CHANGED_PORT] = port;
+        default:
+          break;
       }
 
       base = base + 4 + attrLen;
       lengthRemaining = lengthRemaining - (4 + attrLen);
     }
   }
+
   return responseVal;
 };
 
 const stunTest = async (socket, host, port, sendData = "") => {
+  var transactionId;
+
   var messageReceived = false;
   var strLen = pad(sendData.length / 2, 4);
-  var transactionId = genTransactionId();
-
-  var prxData = convertToHexBuffer(`${BindRequestMsg}${strLen}`);
-  var transId = convertToHexBuffer(transactionId).slice(0, 16);
-  var sndData = convertToHexBuffer(sendData);
-
-  var finalData = Buffer.concat([prxData, transId, sndData]);
 
   return new Promise((resolve) => {
     sendMessage = (counter = 0) => {
+      transactionId = genTransactionId();
+      var prxData = convertToHexBuffer(`${BindRequestMsg}${strLen}`);
+      var transId = convertToHexBuffer(transactionId).slice(0, 16);
+      var sndData = convertToHexBuffer(sendData);
+      var finalData = Buffer.concat([prxData, transId, sndData]);
+
       socket.send(
         finalData,
         0,
@@ -224,12 +230,15 @@ const stunTest = async (socket, host, port, sendData = "") => {
           requestCounter++;
           console.debug("UDP message sent to " + host + ":" + port);
 
-          setTimeout(() => {
+          var bgOp = setTimeout(() => {
             if (!messageReceived) {
-              if (counter > 3) resolve({ Resp: null });
+              if (counter > 3) resolve({ Resp: false });
               sendMessage(counter + 1);
             }
-          }, 2000);
+          }, 5000);
+          // Add timeout obj to array to clear,
+          //   if main process completes before timeouts expire
+          backgroundOps.push(bgOp);
         }
       );
     };
@@ -243,6 +252,7 @@ const stunTest = async (socket, host, port, sendData = "") => {
           message,
           transactionId
         );
+
         resolve(response);
       });
 
@@ -359,6 +369,7 @@ const getDeterminedNatType = async (
   }
 
   socket.close();
+  backgroundOps.map((op) => clearTimeout(op));
   const determinedNatType = getModeFromArray(resultsList);
   console.log("\nDetermined NAT Type: ", determinedNatType);
   console.log(
