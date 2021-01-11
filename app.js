@@ -46,12 +46,11 @@ const sourceIp = "0.0.0.0";
 const sourcePort = 54320;
 
 const backgroundOps = [];
+const transactionIds = [];
 
 const defaultStunHost = "stun.sipgate.net";
 const defaultSampleCount = 20;
 const sampleCountEventListenerMultiplier = 50;
-
-var requestCounter = 0;
 
 /* 
    #######################
@@ -115,7 +114,7 @@ const getIpInfo = async ({ stunHost, stunPort = 3478 }, index) => {
   if (!!natType) {
     // If a network error occurred then try running the test again
     if (natType === CHANGE_ADDR_ERR || natType === BLOCKED) {
-      return await getIpInfo({ stunHost, stunPort }, index);
+      return await getIpInfo({ stunHost }, index);
     }
     console.log(`Test #${index} - NAT TYPE: ${natType}`);
     return natType;
@@ -133,7 +132,7 @@ const genTransactionId = () => {
   return output;
 };
 
-const handleStunTestResponse = (address, port, message, transId) => {
+const handleStunTestResponse = (address, port, message) => {
   var responseVal = {
     Resp: false,
     ExternalIP: null,
@@ -152,15 +151,18 @@ const handleStunTestResponse = (address, port, message, transId) => {
 
   // Check that the transaction IDs match, 0xc2 value is removed as it is
   // an annoying UTF-8 encode byte that messes up the entire comparison
-  transIdMatch = transId.includes(
-    Buffer.from(message, "binary")
-      .slice(4, 30)
-      .toString("hex")
-      .replace(/c2/g, "")
-      .slice(4, 10)
+  transIdMatch = transactionIds.find((transId) =>
+    transId.includes(
+      Buffer.from(message, "binary")
+        .slice(4, 30)
+        .toString("hex")
+        .replace(/c2/g, "")
+        .slice(4, 10)
+    )
   );
 
-  if (bindRespMsg && transIdMatch) {
+  if (bindRespMsg && !!transIdMatch) {
+    transactionIds.slice(transactionIds.length);
     // This is where the fun begins...
     responseVal[RESP] = true;
     msgLen = hexValToInt(`${buf.slice(2, 4).toString("hex")}`);
@@ -204,18 +206,19 @@ const handleStunTestResponse = (address, port, message, transId) => {
   return responseVal;
 };
 
-const stunTest = async (socket, host, port, sendData = "") => {
-  var transactionId;
-
+const stunTest = (socket, host, port, sendData = "") => {
   var messageReceived = false;
-  var strLen = pad(sendData.length / 2, 4);
 
   return new Promise((resolve) => {
-    sendMessage = (counter = 0) => {
-      transactionId = genTransactionId();
+    sendMessage = (counter = 0, recursiveSendData) => {
+      var dataToSend = recursiveSendData ? recursiveSendData : sendData;
+      var strLen = pad(dataToSend.length / 2, 4);
+      var transactionId = genTransactionId();
+      transactionIds.push(transactionId);
+
       var prxData = convertToHexBuffer(`${BindRequestMsg}${strLen}`);
       var transId = convertToHexBuffer(transactionId).slice(0, 16);
-      var sndData = convertToHexBuffer(sendData);
+      var sndData = convertToHexBuffer(dataToSend);
       var finalData = Buffer.concat([prxData, transId, sndData]);
 
       socket.send(
@@ -225,15 +228,12 @@ const stunTest = async (socket, host, port, sendData = "") => {
         port,
         host,
         (err, nrOfBytesSent) => {
-          if (requestCounter > 1000) resolve({ Resp: false });
-          if (err) resolve(console.log(err));
-          requestCounter++;
           console.debug("UDP message sent to " + host + ":" + port);
 
           var bgOp = setTimeout(() => {
             if (!messageReceived) {
-              if (counter > 3) resolve({ Resp: false });
-              sendMessage(counter + 1);
+              if (counter >= 3) resolve({ Resp: false });
+              sendMessage(counter + 1, dataToSend);
             }
           }, 5000);
           // Add timeout obj to array to clear,
@@ -249,14 +249,12 @@ const stunTest = async (socket, host, port, sendData = "") => {
         const response = handleStunTestResponse(
           remote.address,
           remote.port,
-          message,
-          transactionId
+          message
         );
 
         resolve(response);
       });
-
-      sendMessage();
+      sendMessage(15);
     } catch (error) {
       console.debug(error);
       resolve({ Resp: false });
