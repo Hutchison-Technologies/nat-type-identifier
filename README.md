@@ -35,8 +35,6 @@ const whatsMyNat = async () => {
 };
 
 whatsMyNat();
-
-return result;
 ```
 
 ## Installation
