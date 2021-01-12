@@ -118,7 +118,8 @@ const getIpInfo = async ({ stunHost, stunPort = 3478 }, index) => {
     if (natType === CHANGE_ADDR_ERR || natType === BLOCKED) {
       return await getIpInfo({ stunHost }, index);
     }
-    console.log(`Test #${index} - NAT TYPE: ${natType}`);
+    if (settings.includes(LOGS_ACTIVE))
+      console.log(`Test #${index} - NAT TYPE: ${natType}`);
     return natType;
   }
   return ERROR;

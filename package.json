@@ -1,7 +1,7 @@
 {
   "name": "nat-type-identifier",
   "description": "A JavaScript implementation of PyStun used to identify the NAT type that the local system is behind.",
-  "version": "1.0.1",
+  "version": "2.0.0",
   "main": "index.js",
   "dependencies": {
     "binascii": "^0.0.2",
