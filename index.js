@@ -40,7 +40,7 @@ const CHANGED_IP = "ChangedIP";
 const CHANGED_PORT = "ChangedPort";
 const RESP = "Resp";
 
-const CHANGE_ADDR_ERR = "Met an error during Test1 on Changed IP and Port";
+const CHANGE_ADDR_ERR = "Error occurred during Test on Changed IP and Port";
 const LOGS_ACTIVE = "LOGS-ACTIVE";
 
 const sourceIp = "0.0.0.0";
