@@ -1,5 +1,6 @@
 const dgram = require("dgram");
 const binascii = require("binascii");
+const cryptoRandomString = require("crypto-random-string");
 const { EventEmitter } = require("events");
 
 // Types for a STUN message
@@ -126,13 +127,8 @@ const getIpInfo = async ({ stunHost, stunPort = 3478 }, index) => {
 };
 
 const genTransactionId = () => {
-  // Generics a numeric transaction ID
-  const num = "0123456789";
-  let output = "";
-  for (let i = 0; i < 32; ++i) {
-    output += num.charAt(Math.floor(Math.random() * num.length));
-  }
-  return output;
+  // Generates a numeric transaction ID
+  return cryptoRandomString({ length: 32, type: "numeric" });
 };
 
 const handleStunTestResponse = (address, port, message) => {
