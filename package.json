@@ -1,13 +1,17 @@
 {
-  "name": "stun-test",
-  "version": "0.0.1",
-  "description": "An application used to hit stun servers and return the NAT type",
-  "scripts": {
-    "start": "node app.js"
-  },
+  "name": "nat-type-identifier",
+  "description": "A JavaScript implementation of PyStun used to identify the NAT type that the local system is behind.",
+  "version": "1.0.0",
+  "main": "index.js",
   "dependencies": {
     "binascii": "^0.0.2",
     "stun": "^2.1.0"
   },
-  "devDependencies": {}
+  "devDependencies": {},
+  "keywords": [
+    "stun",
+    "nat type"
+  ],
+  "author": "Jeff W. Hughes",
+  "license": "MIT"
 }

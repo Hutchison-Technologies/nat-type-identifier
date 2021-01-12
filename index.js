@@ -41,10 +41,12 @@ const CHANGED_PORT = "ChangedPort";
 const RESP = "Resp";
 
 const CHANGE_ADDR_ERR = "Met an error during Test1 on Changed IP and Port";
+const LOGS_ACTIVE = "LOGS-ACTIVE";
 
 const sourceIp = "0.0.0.0";
 const sourcePort = 54320;
 
+const settings = [];
 const backgroundOps = [];
 const transactionIds = [];
 
@@ -213,9 +215,11 @@ const stunTest = (socket, host, port, sendData = "") => {
     sendMessage = (counter = 0, recursiveSendData) => {
       var dataToSend = recursiveSendData ? recursiveSendData : sendData;
       var strLen = pad(dataToSend.length / 2, 4);
+      // Generate a transaction ID and push it to list
       var transactionId = genTransactionId();
       transactionIds.push(transactionId);
 
+      // Generate hex buffer composed of msg, length, transaction ID, and data to send
       var prxData = convertToHexBuffer(`${BindRequestMsg}${strLen}`);
       var transId = convertToHexBuffer(transactionId).slice(0, 16);
       var sndData = convertToHexBuffer(dataToSend);
@@ -228,8 +232,10 @@ const stunTest = (socket, host, port, sendData = "") => {
         port,
         host,
         (err, nrOfBytesSent) => {
-          console.debug("UDP message sent to " + host + ":" + port);
+          if (settings.includes(LOGS_ACTIVE))
+            console.log("UDP message sent to " + host + ":" + port);
 
+          // Attempt to send messages 3 times otherwise resolve as failure
           var bgOp = setTimeout(() => {
             if (!messageReceived) {
               if (counter >= 3) resolve({ Resp: false });
@@ -244,6 +250,7 @@ const stunTest = (socket, host, port, sendData = "") => {
     };
 
     try {
+      // Upon receiving message, handle it as STUN response
       socket.on("message", (message, remote) => {
         messageReceived = true;
         const response = handleStunTestResponse(
@@ -254,9 +261,9 @@ const stunTest = (socket, host, port, sendData = "") => {
 
         resolve(response);
       });
-      sendMessage(15);
+      sendMessage();
     } catch (error) {
-      console.debug(error);
+      if (settings.includes(LOGS_ACTIVE)) console.log(error);
       resolve({ Resp: false });
     }
   });
@@ -351,10 +358,7 @@ var socket = dgram.createSocket({
   recvBufferSize: 2048,
 });
 
-const getDeterminedNatType = async (
-  sampleCount = defaultSampleCount,
-  stunHost = defaultStunHost
-) => {
+const getDeterminedNatType = async (sampleCount, stunHost) => {
   EventEmitter.defaultMaxListeners =
     sampleCountEventListenerMultiplier * sampleCount;
   socket.bind(sourcePort, sourceIp);
@@ -367,20 +371,23 @@ const getDeterminedNatType = async (
   }
 
   socket.close();
+  // Clear timeout operations on socket.messages
   backgroundOps.map((op) => clearTimeout(op));
   const determinedNatType = getModeFromArray(resultsList);
-  console.log("\nDetermined NAT Type: ", determinedNatType);
-  console.log(
-    `A mode value is selected using a ${sampleCount} test samples as failed responses via UDP can cause inaccurate results.`
-  );
+  if (settings.includes(LOGS_ACTIVE)) {
+    console.log("\nDetermined NAT Type: ", determinedNatType);
+    console.log(
+      `A mode value is selected using a ${sampleCount} test samples as failed responses via UDP can cause inaccurate results.`
+    );
+  }
   return determinedNatType;
 };
 
-// Include runtime argument capability for user to specify stun host
-// Argument 1: Sample Count, Arg2: STUN Host
-const runtimeArguments = process.argv.slice(2);
-runtimeArguments[0]
-  ? runtimeArguments[1]
-    ? getDeterminedNatType(runtimeArguments[0], runtimeArguments[1])
-    : getDeterminedNatType(runtimeArguments[0])
-  : getDeterminedNatType();
+module.exports = ({
+  logsEnabled = true,
+  sampleCount = defaultSampleCount,
+  stunHost = defaultStunHost,
+}) => {
+  if (logsEnabled) settings.push(LOGS_ACTIVE);
+  return getDeterminedNatType(sampleCount, stunHost);
+};
