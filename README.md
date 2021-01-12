@@ -26,8 +26,12 @@ To ensure the most reliable result, the program executes a number of tests which
 const getNatType = require("nat-type-identifier");
 
 // Parameters default to following listed below
-return getNatType({ logsEnabled: true, sampleCount: 20, stunHost: "stun.sipgate.net" });
+const params = { logsEnabled: true, sampleCount: 20, stunHost: "stun.sipgate.net" };
+const result = await getNatType(params);
 
+console.log("Result: ", result); // Outputs NAT type
+
+return result;
 ```
 
 ## Installation

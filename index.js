@@ -384,11 +384,11 @@ const getDeterminedNatType = async (sampleCount, stunHost) => {
   return determinedNatType;
 };
 
-module.exports = ({
+module.exports = async ({
   logsEnabled = true,
   sampleCount = defaultSampleCount,
   stunHost = defaultStunHost,
 }) => {
   if (logsEnabled) settings.push(LOGS_ACTIVE);
-  return getDeterminedNatType(sampleCount, stunHost);
+  return await getDeterminedNatType(sampleCount, stunHost);
 };
