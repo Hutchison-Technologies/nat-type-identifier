@@ -25,7 +25,6 @@ To ensure the most reliable result, the program executes a number of tests which
 ```
 const getNatType = require("nat-type-identifier");
 
-// Parameters default to following listed below
 const params = { logsEnabled: true, sampleCount: 20, stunHost: "stun.sipgate.net" };
 
 const whatsMyNat = async () => {

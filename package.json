@@ -1,7 +1,7 @@
 {
   "name": "nat-type-identifier",
   "description": "A JavaScript implementation of PyStun used to identify the NAT type that the local system is behind.",
-  "version": "2.0.6",
+  "version": "2.0.8",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -13,7 +13,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/jwh4-cs/nat-type-identifier.git"
+    "url": "https://github.com/Hutchison-Technologies/nat-type-identifier"
   },
   "devDependencies": {},
   "keywords": [
