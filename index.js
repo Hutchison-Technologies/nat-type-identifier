@@ -31,6 +31,7 @@ const SYMMETRIC_UDP_FIREWALL = "Symmetric UDP Firewall";
 const RESTRICTED_NAT = "Restric NAT";
 const RESTRICTED_PORT_NAT = "Restric Port NAT";
 const SYMMETRIC_NAT = "Symmetric NAT";
+const ERROR = "Error";
 
 // Response Attributes
 const EXT_IP = "ExternalIP";
@@ -207,9 +208,10 @@ const handleStunTestResponse = (address, port, message) => {
 
 const stunTest = (socket, host, port, sendData = "") => {
   var messageReceived = false;
-
+  var bgOp
+  var onMessage
   return new Promise((resolve) => {
-    sendMessage = (counter = 0, recursiveSendData) => {
+    const sendMessage = (counter = 0, recursiveSendData) => {
       var dataToSend = recursiveSendData ? recursiveSendData : sendData;
       var strLen = pad(dataToSend.length / 2, 4);
       // Generate a transaction ID and push it to list
@@ -233,9 +235,13 @@ const stunTest = (socket, host, port, sendData = "") => {
             console.log("UDP message sent to " + host + ":" + port);
 
           // Attempt to send messages 3 times otherwise resolve as failure
-          var bgOp = setTimeout(() => {
+          bgOp = setTimeout(() => {
             if (!messageReceived) {
-              if (counter >= 3) resolve({ Resp: false });
+              if (counter >= 3) {
+                resolve({ Resp: false });
+                return;
+              }
+
               sendMessage(counter + 1, dataToSend);
             }
           }, 5000);
@@ -247,8 +253,7 @@ const stunTest = (socket, host, port, sendData = "") => {
     };
 
     try {
-      // Upon receiving message, handle it as STUN response
-      socket.on("message", (message, remote) => {
+      onMessage = (message, remote) => {
         messageReceived = true;
         const response = handleStunTestResponse(
           remote.address,
@@ -258,11 +263,21 @@ const stunTest = (socket, host, port, sendData = "") => {
 
         resolve(response);
       });
+
+      // Upon receiving message, handle it as STUN response
+      socket.once("message", onMessage)
       sendMessage();
     } catch (error) {
       if (settings.includes(LOGS_ACTIVE)) console.log(error);
       resolve({ Resp: false });
     }
+  }).finally(() => {
+    // remove listener if one was added
+    if (onMessage) {
+      socket.off("message", onMessage);
+    }
+    // remove any pending tasks
+    clearTimeout(bgOp);
   });
 };
 
@@ -356,8 +371,7 @@ var socket = dgram.createSocket({
 });
 
 const getDeterminedNatType = async (sampleCount, stunHost) => {
-  EventEmitter.defaultMaxListeners =
-    sampleCountEventListenerMultiplier * sampleCount;
+  socket.setMaxListeners(sampleCountEventListenerMultiplier * sampleCount);
   socket.bind(sourcePort, sourceIp);
 
   const resultsList = [];
