@@ -262,10 +262,10 @@ const stunTest = (socket, host, port, sendData = "") => {
         );
 
         resolve(response);
-      });
+      }
 
       // Upon receiving message, handle it as STUN response
-      socket.once("message", onMessage)
+      socket.once("message", onMessage);
       sendMessage();
     } catch (error) {
       if (settings.includes(LOGS_ACTIVE)) console.log(error);
