@@ -1,7 +1,6 @@
 const dgram = require("dgram");
 const binascii = require("binascii");
 const cryptoRandomString = require("crypto-random-string");
-const { EventEmitter } = require("events");
 
 // Types for a STUN message
 const BindRequestMsg = "0001";

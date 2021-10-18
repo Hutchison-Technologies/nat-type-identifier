@@ -3,13 +3,13 @@
   "description": "A JavaScript implementation of PyStun used to identify the NAT type that the local system is behind.",
   "version": "2.0.11",
   "main": "index.js",
+  "types": "index.d.ts",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "binascii": "^0.0.2",
-    "crypto-random-string": "^3.3.0",
-    "stun": "^2.1.0"
+    "crypto-random-string": "^3.3.0"
   },
   "repository": {
     "type": "git",
